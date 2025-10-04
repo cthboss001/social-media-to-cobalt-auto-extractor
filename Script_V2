@@ -1,0 +1,202 @@
+// ==UserScript==
+// @name         Social Media to Cobalt.tools Auto-Extractor
+// @namespace    http://tampermonkey.net/
+// @version      2.0
+// @description  Automatically redirect Facebook, Instagram, TikTok, and VK links to cobalt.tools and extract content
+// @author       cthboss001
+// @match        https://www.facebook.com/*
+// @match        https://fb.watch/*
+// @match        https://m.facebook.com/*
+// @match        https://www.instagram.com/*
+// @match        https://instagram.com/*
+// @match        https://www.tiktok.com/*
+// @match        https://tiktok.com/*
+// @match        https://vm.tiktok.com/*
+// @match        https://vk.com/*
+// @match        https://www.vk.com/*
+// @match        https://m.vk.com/*
+// @match        https://cobalt.tools/*
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @grant        GM_deleteValue
+// @run-at       document-start
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    const currentUrl = window.location.href;
+
+    // Check if we're on a supported social media URL that should be redirected
+    function isSupportedSocialUrl(url) {
+        return (
+            // Facebook URLs
+            url.includes('facebook.com/') ||
+            url.includes('fb.watch/') ||
+            // Instagram URLs
+            url.includes('instagram.com/') ||
+            // TikTok URLs
+            url.includes('tiktok.com/') ||
+            url.includes('vm.tiktok.com/') ||
+            // VK URLs
+            url.includes('vk.com/')
+        );
+    }
+
+    // Get platform name for logging
+    function getPlatformName(url) {
+        if (url.includes('facebook.com/') || url.includes('fb.watch/')) return 'Facebook';
+        if (url.includes('instagram.com/')) return 'Instagram';
+        if (url.includes('tiktok.com/')) return 'TikTok';
+        if (url.includes('vk.com/')) return 'VK';
+        return 'Unknown';
+    }
+
+    // Check if we're on cobalt.tools
+    function isCobaltTools(url) {
+        return url.includes('cobalt.tools');
+    }
+
+    // Store the social media URL and redirect to cobalt.tools
+    if (isSupportedSocialUrl(currentUrl) && !isCobaltTools(currentUrl)) {
+        const platform = getPlatformName(currentUrl);
+        console.log(`${platform} URL detected:`, currentUrl);
+        console.log('Redirecting to cobalt.tools...');
+        GM_setValue('originalSocialUrl', currentUrl);
+        GM_setValue('socialPlatform', platform);
+        window.location.href = 'https://cobalt.tools/';
+        return;
+    }
+
+    // If we're on cobalt.tools and have a stored social media URL, automate the process
+    if (isCobaltTools(currentUrl)) {
+        const originalSocialUrl = GM_getValue('originalSocialUrl');
+        const platform = GM_getValue('socialPlatform');
+
+        if (originalSocialUrl && platform) {
+            console.log(`On cobalt.tools with original ${platform} URL from address bar:`, originalSocialUrl);
+
+            // Wait for the page to fully load
+            function waitForElement(selector, callback, maxAttempts = 50) {
+                let attempts = 0;
+
+                function check() {
+                    const element = document.querySelector(selector);
+                    attempts++;
+
+                    if (element) {
+                        callback(element);
+                    } else if (attempts < maxAttempts) {
+                        setTimeout(check, 200);
+                    } else {
+                        console.error('Element not found after maximum attempts:', selector);
+                    }
+                }
+
+                check();
+            }
+
+            // Function to fill the input and submit
+            function automateExtraction() {
+                console.log('Starting automation process...');
+
+                // Wait 6 seconds before filling the input field
+                setTimeout(() => {
+                    console.log('6 seconds elapsed, looking for input field...');
+
+                    // Look for the URL input field
+                    waitForElement('input[type="text"], input[type="url"], input[placeholder*="url"], input[placeholder*="link"]', (input) => {
+                        console.log(`Input field found, filling with original ${platform} URL from address bar:`, originalSocialUrl);
+
+                        // Fill the input with the original social media URL from the address bar
+                        input.value = originalSocialUrl;
+                        input.focus();
+
+                        // Trigger input events to ensure the site recognizes the change
+                        input.dispatchEvent(new Event('input', { bubbles: true }));
+                        input.dispatchEvent(new Event('change', { bubbles: true }));
+
+                        // Wait 3 seconds after pasting before clicking the submit button
+                        setTimeout(() => {
+                            console.log('Looking for the >> submit button...');
+
+                            // Look specifically for the ">>" button you marked
+                            const submitSelectors = [
+                                'button:contains(">>")',
+                                'button[title*=">>"]',
+                                'button[aria-label*=">>"]',
+                                '.submit-btn',
+                                'button[type="submit"]',
+                                'button:last-of-type'
+                            ];
+
+                            let submitButton = null;
+
+                            // First try to find button with ">>" text
+                            const buttons = document.querySelectorAll('button');
+                            submitButton = Array.from(buttons).find(btn =>
+                                btn.textContent.trim().includes('>>') ||
+                                btn.textContent.trim() === '>>' ||
+                                btn.innerHTML.includes('>>')
+                            );
+
+                            // If not found, try other selectors
+                            if (!submitButton) {
+                                for (const selector of submitSelectors) {
+                                    if (selector.includes(':contains')) {
+                                        continue; // Already handled above
+                                    }
+                                    submitButton = document.querySelector(selector);
+                                    if (submitButton) break;
+                                }
+                            }
+
+                            if (submitButton) {
+                                console.log('Submit button found, clicking:', submitButton);
+                                submitButton.click();
+
+                                // Clear the stored URLs after successful submission
+                                setTimeout(() => {
+                                    GM_deleteValue('originalSocialUrl');
+                                    GM_deleteValue('socialPlatform');
+                                }, 2000);
+                            } else {
+                                console.log('Submit button not found, trying Enter key...');
+                                input.dispatchEvent(new KeyboardEvent('keydown', {
+                                    key: 'Enter',
+                                    code: 'Enter',
+                                    keyCode: 13,
+                                    bubbles: true
+                                }));
+
+                                // Clear the stored URLs
+                                setTimeout(() => {
+                                    GM_deleteValue('originalSocialUrl');
+                                    GM_deleteValue('socialPlatform');
+                                }, 2000);
+                            }
+                        }, 3000); // 3 second delay after pasting link before clicking submit
+                    });
+                }, 6000); // 6 second delay before filling input
+            }
+
+            // Wait for the page to be fully loaded before starting automation
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', () => {
+                    setTimeout(automateExtraction, 1000);
+                });
+            } else {
+                setTimeout(automateExtraction, 1000);
+            }
+        }
+    }
+
+    // Clean up stored URLs if user navigates away from cobalt.tools
+    window.addEventListener('beforeunload', () => {
+        if (!isCobaltTools(window.location.href)) {
+            GM_deleteValue('originalSocialUrl');
+            GM_deleteValue('socialPlatform');
+        }
+    });
+
+})();
